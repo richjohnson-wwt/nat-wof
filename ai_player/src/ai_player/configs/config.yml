@@ -5,11 +5,43 @@ general:
       level: WARN
 
   front_end:
-    _type: fastapi
-
-  front_end:
     _type: console
 
+llms:
+  nim_llm:
+    _type: nim
+    model_name: meta/llama-3.1-70b-instruct
+    temperature: 0.0
+    max_tokens: 1024
+  openai_llm:
+    _type: openai
+    model_name: gpt-3.5-turbo
+    max_tokens: 2000
+
+functions:
+  solve_puzzle_if_knows_answer:
+    _type: solve_puzzle_if_knows_answer
+    description: |
+      Solves the puzzle if knows the answer
+  spin_wheel_and_guess_consonant:
+    _type: spin_wheel_and_guess_consonant
+    description: |
+      Spins the wheel and guesses a consonant
+  buy_vowel_if_enough_money:
+    _type: buy_vowel_if_enough_money
+    description: |
+      Buys a vowel if enough money
+
 workflow:
-  _type: ai_player
-  parameter: default_value
+  _type: react_agent
+  tool_names:
+    - solve_puzzle_if_knows_answer
+    - buy_vowel_if_enough_money
+    - spin_wheel_and_guess_consonant
+  llm_name: nim_llm
+  verbose: true
+  parse_agent_response_max_retries: 3
+  # Limit the agent to one tool call per run to enforce a single turn
+  max_tool_calls: 1
+  # Allow a few extra think steps after the single tool call so the agent can produce a Final Answer
+  recursion_limit: 8

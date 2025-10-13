@@ -11,7 +11,8 @@ def start_new_game(puzzle, answer, theme):
         "theme": theme,
         "turn": "AI1",
         "status": "active",
-        "guessed_letters": json.dumps([]),
+        "guessed_consonants": json.dumps([]),
+        "guessed_vowels": json.dumps([]),
         "revealed": json.dumps([]),
         "scores": json.dumps({"AI1": 0, "AI2": 0, "Rich": 0})
     })
@@ -26,6 +27,8 @@ def get_current_game():
     # decode any JSON fields
     data["revealed"] = json.loads(data["revealed"])
     data["scores"] = json.loads(data["scores"])
+    data["guessed_consonants"] = json.loads(data["guessed_consonants"])
+    data["guessed_vowels"] = json.loads(data["guessed_vowels"])
     return data
 
 def update_game_field(field, value):
@@ -35,3 +38,7 @@ def update_game_field(field, value):
 def end_current_game():
     game_id = r.get("current_game_id")
     r.hset(f"game:{game_id}", "status", "finished")
+
+def get_field(field):
+    game_id = r.get("current_game_id")
+    return r.hget(f"game:{game_id}", field)
