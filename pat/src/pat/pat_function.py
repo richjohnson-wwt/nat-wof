@@ -48,7 +48,7 @@ async def pat_function(
                 "updates": {
                     "game_id": current_game_id,
                     "status": current_game_status,
-                    "turn": current_player_turn,
+                    "player": current_player_turn,
                 },
             }
             return json.dumps(output)

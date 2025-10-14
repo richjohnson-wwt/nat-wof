@@ -13,8 +13,8 @@ def set_turn(player: str):
     if not game_id:
         print("No current_game_id set")
         return
-    r.hset(f"game:{game_id}", "turn", player)
-    print(f"Set turn to {player} on game:{game_id}")
+    r.hset(f"game:{game_id}", "player", player)
+    print(f"Set player to {player} on game:{game_id}")
 
 def hello_redis():
     r.set("msg:hello", "Hello Redis!!!")
@@ -30,8 +30,10 @@ def generate_ai_player_prompt():
     # Fetch fields from Redis
     puzzle = r.hget(f"game:{game_id}", "puzzle")
     theme = r.hget(f"game:{game_id}", "theme")
-    turn = r.hget(f"game:{game_id}", "turn")
     status = r.hget(f"game:{game_id}", "status")
+    # Prefer consonants-specific list if available
+    guessed_consonants_raw = r.hget(f"game:{game_id}", "guessed_consonants")
+    # Backward-compatibility: some games may store all letters in 'guessed_letters'
     guessed_letters_raw = r.hget(f"game:{game_id}", "guessed_letters")
     guessed_vowels_raw = r.hget(f"game:{game_id}", "guessed_vowels")
     scores_raw = r.hget(f"game:{game_id}", "scores")
@@ -44,14 +46,18 @@ def generate_ai_player_prompt():
         except Exception:
             return default
 
-    guessed_letters = _coerce_json(guessed_letters_raw, [])
+    # guessed_letters should represent consonants used in examples and AI inputs
+    guessed_consonants = _coerce_json(guessed_consonants_raw, None)
+    if guessed_consonants is None:
+        # Fallback to 'guessed_letters' if consonants-specific key isn't present
+        guessed_consonants = _coerce_json(guessed_letters_raw, [])
+    guessed_letters = guessed_consonants
     guessed_vowels = _coerce_json(guessed_vowels_raw, [])
     scores = _coerce_json(scores_raw, {"AI1": 0, "AI2": 0, "Rich": 0})
 
     payload = {
         "puzzle": puzzle,
         "theme": theme,
-        "turn": turn,
         "status": status,
         "guessed_letters": guessed_letters,
         "guessed_vowels": guessed_vowels,

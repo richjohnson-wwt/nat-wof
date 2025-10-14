@@ -55,7 +55,6 @@ nat run --config_file wof/ai_player/src/ai_player/configs/config.yml --input "$(
 {
      "puzzle": "_ E _ E T A R I A _ * _ I _ _ A",
      "theme": "Food & Drink",
-     "turn": "AI1",
      "status": "active",
      "guessed_letters": ["R", "S", "T"],
      "guessed_vowels": ["A", "E", "I"],

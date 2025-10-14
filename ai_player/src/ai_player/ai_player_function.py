@@ -24,12 +24,11 @@ async def solve_puzzle_if_knows_answer(
         # Accept a single text input, parse JSON if present, and evaluate against Redis answer
         from ai_player.state_manager import get_field, set_current_game_status_finished, reveal_all
 
-        player_name = "AI1"
         llm_guess = None
         # Parse any provided input for optional context (player, puzzle, theme)
         try:
             data = json.loads(input_text) if input_text else {}
-            player_name = data.get("player") or data.get("turn") or player_name
+            player_name = data.get("player")
         except Exception:
             data = {}
 
@@ -66,7 +65,11 @@ async def solve_puzzle_if_knows_answer(
 
             llm = await builder.get_llm("openai_llm", wrapper_type="langchain")
             system_preamble = (
-                "You are a Wheel of Fortune solver. Given a masked puzzle and theme, output only the solved puzzle in UPPERCASE letters and spaces."
+                "You are playing Wheel of Fortune. Decide exactly ONE of the following and reply accordingly:\n"
+                "1) If you are confident you can solve the puzzle, reply: 'Solution: <ANSWER>' (UPPERCASE letters and spaces only).\n"
+                "2) If you want to buy a vowel, reply exactly: 'I would like to buy a vowel'.\n"
+                "3) If you want to spin, reply exactly: 'I would like to spin'.\n"
+                "Do not add any extra commentary."
             )
             # Replace '*' with spaces to reduce ambiguity for the model
             masked_for_prompt = (masked_puzzle or "").replace("*", " ")
@@ -74,7 +77,7 @@ async def solve_puzzle_if_knows_answer(
                 f"{system_preamble}\n"
                 f"Masked Puzzle: {masked_for_prompt}\n"
                 f"Theme: {theme}\n"
-                f"Rules: Return only the solved phrase in uppercase letters and spaces (no quotes, no punctuation, no explanation)."
+                f"Constraints: If choosing Solution, return 'Solution: ' followed by only UPPERCASE letters and spaces."
             )
             llm_output = await llm.ainvoke(prompt)
             # Debug: log raw LLM output for troubleshooting
@@ -83,19 +86,36 @@ async def solve_puzzle_if_knows_answer(
             except Exception:
                 pass
             try:
-                llm_guess = getattr(llm_output, "content", None) or (
+                raw_reply = getattr(llm_output, "content", None) or (
                     llm_output if isinstance(llm_output, str) else str(llm_output)
                 )
             except Exception:
-                llm_guess = str(llm_output)
+                raw_reply = str(llm_output)
 
             # Cleanup proposed solution: keep letters and spaces only, uppercase
             import re as _re
-            llm_guess = _re.sub(r"[^A-Za-z ]+", "", llm_guess or "").upper().strip()
+            next_action = None
+            llm_guess = None
+            raw_lower = (raw_reply or "").strip().lower()
+            # Parse intent
+            if raw_lower.startswith("solution:"):
+                next_action = "solve"
+                # Extract after 'Solution:' and clean
+                _ans = (raw_reply.split(":", 1)[1] if ":" in (raw_reply or "") else raw_reply)
+                llm_guess = _re.sub(r"[^A-Za-z ]+", "", _ans or "").upper().strip()
+            elif "buy a vowel" in raw_lower:
+                next_action = "buy_vowel"
+            elif "spin" in raw_lower:
+                next_action = "spin"
+            else:
+                # Fallback: treat as a direct guess answer
+                next_action = "solve"
+                llm_guess = _re.sub(r"[^A-Za-z ]+", "", raw_reply or "").upper().strip()
             # Debug: log cleaned guess and context
             try:
                 logger.info(
-                    "Solve step: cleaned guess='%s', masked_puzzle='%s', theme='%s'",
+                    "Solve step: parsed next_action='%s', cleaned guess='%s', masked_puzzle='%s', theme='%s'",
+                    next_action,
                     llm_guess,
                     masked_puzzle,
                     theme,
@@ -103,7 +123,7 @@ async def solve_puzzle_if_knows_answer(
             except Exception:
                 pass
 
-            if llm_guess:
+            if next_action == "solve" and llm_guess:
                 if true_answer is None:
                     details = f"LLM proposed '{llm_guess}', but true answer unavailable"
                 else:
@@ -125,6 +145,15 @@ async def solve_puzzle_if_knows_answer(
                         if success
                         else f"LLM guessed '{llm_guess}', but answer is '{true_answer}'"
                     )
+                    # If an incorrect solve was attempted, end the turn (skip downstream)
+                    if not success:
+                        logger.info("Solve step: incorrect solve attempted; ending turn and skipping downstream steps.")
+            elif next_action == "buy_vowel":
+                details = "Chose to buy a vowel."
+                success = False
+            elif next_action == "spin":
+                details = "Chose to spin."
+                success = False
             else:
                 details = "LLM did not produce a usable guess"
         except Exception as e:
@@ -152,8 +181,12 @@ async def solve_puzzle_if_knows_answer(
         # Compose final answer for solve attempt
         if success and llm_guess:
             fa = f"Final Answer: Solved '{llm_guess}'."
-        elif llm_guess:
+        elif next_action == "solve" and llm_guess:
             fa = f"Final Answer: LLM proposed '{llm_guess}' but it was incorrect."
+        elif next_action == "buy_vowel":
+            fa = "Final Answer: I would like to buy a vowel."
+        elif next_action == "spin":
+            fa = "Final Answer: I would like to spin."
         else:
             fa = "Final Answer: No LLM solution produced."
         solve_output = {
@@ -163,6 +196,7 @@ async def solve_puzzle_if_knows_answer(
             # Top-level fields to make downstream steps simpler
             "player": player_name,
             "llm_guess": llm_guess,
+            "next_action": next_action,
             "updates": {
                 "player": player_name,
                 "llm_guess": llm_guess,
@@ -172,9 +206,15 @@ async def solve_puzzle_if_knows_answer(
                 "scores": scores_snapshot,
             },
             # Hint for sequential_executor: when True, downstream steps should no-op/skip
-            "skip_next": bool(success),
+            # End-turn if solved correctly OR if an incorrect solve was attempted
+            "skip_next": bool(success) or (next_action == "solve" and not success and llm_guess is not None),
             "final_answer": fa,
         }
+        # Initialize history with this step
+        try:
+            solve_output["history"] = [{k: v for k, v in solve_output.items() if k != "history"}]
+        except Exception:
+            pass
         return json.dumps(solve_output)
 
     try:
@@ -217,6 +257,9 @@ async def buy_vowel_if_enough_money(
         except Exception:
             data = {}
 
+        # Respect next_action from solve step
+        next_action = (data.get("next_action") or "").strip().lower() if isinstance(data, dict) else None
+
         # Sequential skip: if the solve step already succeeded (or asked to skip next), no-op
         try:
             if bool(data.get("skip_next")) or (data.get("action") == "solve" and bool(data.get("success"))):
@@ -226,19 +269,54 @@ async def buy_vowel_if_enough_money(
                     "skipped": True,
                     "details": "Skipped because puzzle was already solved.",
                     "player": player_name,
-                    "updates": {"player": player_name},
+                    "next_action": next_action or "",
+                    "updates": {
+                        "player": player_name,
+                        "puzzle": get_field("puzzle"),
+                        "scores": get_field("scores"),
+                    },
                     # Propagate skip so spin is also skipped
                     "skip_next": True,
+                }
+                # History aggregation
+                try:
+                    hist = data.get("history") or []
+                    hist.append({k: v for k, v in skipped_output.items() if k != "history"})
+                    skipped_output["history"] = hist
+                except Exception:
+                    pass
+                return json.dumps(skipped_output)
+            # If the agent chose to spin, skip buying a vowel but let spin proceed (skip_next False)
+            if next_action == "spin":
+                skipped_output = {
+                    "action": "buy_vowel",
+                    "success": True,
+                    "skipped": True,
+                    "details": "Skipped because agent chose to spin.",
+                    "player": player_name,
+                    "next_action": next_action,
+                    "updates": {
+                        "player": player_name,
+                        "puzzle": get_field("puzzle"),
+                        "scores": get_field("scores"),
+                    },
+                    # Do not skip next so spin can run
+                    "skip_next": False,
                 }
                 return json.dumps(skipped_output)
         except Exception:
             pass
 
-        # Load scores from Redis
+        # Load scores from Redis (handle both JSON string and dict)
         try:
             import json as _json
             scores_raw = get_field("scores")
-            scores = _json.loads(scores_raw) if scores_raw else {}
+            if isinstance(scores_raw, str):
+                scores = _json.loads(scores_raw) if scores_raw else {}
+            elif isinstance(scores_raw, dict):
+                scores = scores_raw
+            else:
+                scores = {}
         except Exception as e:
             logger.warning("Failed to load scores: %s", e)
             scores = {}
@@ -258,11 +336,27 @@ async def buy_vowel_if_enough_money(
                 "skipped": False,
                 "details": f"Insufficient funds: {player_name} has {current_money}, needs {cost}",
                 "player": player_name,
+                "next_action": next_action or "buy_vowel",
                 "updates": {
                     "player": player_name,
+                    "puzzle": get_field("puzzle"),
                     "remaining_vowels": remaining_vowels,
                 },
             }
+            # History aggregation
+            try:
+                hist = data.get("history") or []
+                hist.append({k: v for k, v in output.items() if k != "history"})
+                output["history"] = hist
+            except Exception:
+                pass
+            # History aggregation
+            try:
+                hist = data.get("history") or []
+                hist.append({k: v for k, v in output.items() if k != "history"})
+                output["history"] = hist
+            except Exception:
+                pass
             return json.dumps(output)
 
         # Choose a vowel to buy (simple heuristic: first available)
@@ -306,6 +400,7 @@ async def buy_vowel_if_enough_money(
             "skipped": False,
             "details": details + (f"; occurrences={occurrences}" if chosen_vowel else ""),
             "player": player_name,
+            "next_action": "buy_vowel",
             "updates": {
                 "player": player_name,
                 "chosen_vowel": chosen_vowel,
@@ -320,6 +415,13 @@ async def buy_vowel_if_enough_money(
             "skip_next": bool(chosen_vowel is not None),
             "final_answer": fa,
         }
+        # History aggregation
+        try:
+            hist = data.get("history") or []
+            hist.append({k: v for k, v in buy_vowel_output.items() if k != "history"})
+            buy_vowel_output["history"] = hist
+        except Exception:
+            pass
         return json.dumps(buy_vowel_output)
 
     try:
@@ -362,17 +464,45 @@ async def spin_wheel_and_guess_consonant(
         except Exception:
             data = {}
 
+        next_action = (data.get("next_action") or "").strip().lower() if isinstance(data, dict) else None
+
         # Sequential skip: if previous step signaled skip or buy_vowel succeeded, no-op
         try:
-            if bool(data.get("skip_next")) or (data.get("action") == "buy_vowel" and bool(data.get("success"))):
+            if bool(data.get("skip_next")):
                 skipped_output = {
                     "action": "spin",
                     "success": True,
                     "skipped": True,
-                    "details": "Skipped because a vowel was just bought or a previous step requested skip.",
+                    "details": "Skipped because a previous step requested skip (turn ended).",
                     "player": player_name,
-                    "updates": {"player": player_name},
+                    "next_action": next_action or "",
+                    "updates": {
+                        "player": player_name,
+                        "puzzle": get_field("puzzle"),
+                        "scores": get_field("scores"),
+                    },
                 }
+                return json.dumps(skipped_output)
+            if (data.get("action") == "buy_vowel" and bool(data.get("success"))):
+                skipped_output = {
+                    "action": "spin",
+                    "success": True,
+                    "skipped": True,
+                    "details": "Skipped because a vowel was just bought.",
+                    "player": player_name,
+                    "next_action": next_action or "buy_vowel",
+                    "updates": {
+                        "player": player_name,
+                        "puzzle": get_field("puzzle"),
+                        "scores": get_field("scores"),
+                    },
+                }
+                try:
+                    hist = data.get("history") or []
+                    hist.append({k: v for k, v in skipped_output.items() if k != "history"})
+                    skipped_output["history"] = hist
+                except Exception:
+                    pass
                 return json.dumps(skipped_output)
         except Exception:
             pass
@@ -392,6 +522,7 @@ async def spin_wheel_and_guess_consonant(
                 "skipped": False,
                 "details": "Spin failed (no wheel)",
                 "player": player_name,
+                "next_action": "spin",
                 "updates": {"player": player_name},
                 "final_answer": "Final Answer: Spin failed (no wheel).",
             }
@@ -444,6 +575,7 @@ async def spin_wheel_and_guess_consonant(
                 "skipped": False,
                 "details": details + "; BANKRUPT -> score set to 0",
                 "player": player_name,
+                "next_action": "spin",
                 "updates": {
                     "player": player_name,
                     "wheel_wedge": wedge,
@@ -463,6 +595,7 @@ async def spin_wheel_and_guess_consonant(
                 "skipped": False,
                 "details": details + "; Lose a Turn",
                 "player": player_name,
+                "next_action": "spin",
                 "updates": {
                     "player": player_name,
                     "wheel_wedge": wedge,
@@ -519,6 +652,7 @@ async def spin_wheel_and_guess_consonant(
                 if chosen_letter else ""
             ),
             "player": player_name,
+            "next_action": "spin",
             "updates": {
                 "player": player_name,
                 "wheel_wedge": wedge,
