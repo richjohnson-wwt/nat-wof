@@ -200,27 +200,3 @@ def reveal_all() -> None:
     r.hset(f"game:{game_id}", "puzzle", masked)
 
 
-# --- Per-run/turn guard helpers ---
-TURN_COMPLETED_FIELD = "turn_completed"
-
-
-def is_turn_completed() -> bool:
-    game_id = r.get("current_game_id")
-    if not game_id:
-        return False
-    val = r.hget(f"game:{game_id}", TURN_COMPLETED_FIELD)
-    return str(val).lower() in ("1", "true", "yes")
-
-
-def set_turn_completed(value: bool = True) -> None:
-    game_id = r.get("current_game_id")
-    if not game_id:
-        return
-    r.hset(f"game:{game_id}", TURN_COMPLETED_FIELD, "1" if value else "0")
-
-
-def clear_turn_completed() -> None:
-    game_id = r.get("current_game_id")
-    if not game_id:
-        return
-    r.hdel(f"game:{game_id}", TURN_COMPLETED_FIELD)
