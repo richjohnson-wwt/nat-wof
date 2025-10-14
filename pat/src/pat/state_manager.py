@@ -9,7 +9,7 @@ def start_new_game(puzzle, answer, theme):
         "puzzle": puzzle,
         "answer": answer,
         "theme": theme,
-        "turn": "AI1",
+        "player": "AI1",
         "status": "active",
         "guessed_consonants": json.dumps([]),
         "guessed_vowels": json.dumps([]),

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class PatFunctionConfig(FunctionBaseConfig, name="pat"):
     """
     Host setup function (Pat Sajak). Starts a new Wheel of Fortune game in Redis
-    with a masked puzzle, answer, theme, and initializes turn/scores/guesses.
+    with a masked puzzle, answer, theme, and initializes player/scores/guesses.
     """
     # Optional: allow forcing a new game even if one is active
     force_new: bool = Field(default=False, description="If true, start a new game even if one is active")
@@ -40,7 +40,7 @@ async def pat_function(
         current_game_status = get_field("status")
 
         if (not config.force_new) and current_game_status == "active":
-            current_player_turn = get_field("turn")
+            current_player_turn = get_field("player")
             output = {
                 "action": "start_or_resume",
                 "success": True,
@@ -57,7 +57,7 @@ async def pat_function(
             puzzle, theme = get_puzzle()
             masked = mask_puzzle(puzzle)
             start_new_game(masked, puzzle, theme)
-            # Initialize turn to AI1 and clear the per-run guard
+            # Initialize player to AI1 and clear the per-run guard
             if set_turn:
                 try:
                     set_turn("AI1")
@@ -83,7 +83,7 @@ async def pat_function(
             _response_fn,
             description=(
                 "Host function to start a new Wheel of Fortune game in Redis. "
-                "Initializes puzzle/answer/theme, sets turn to AI1, and clears the per-run turn guard."
+                "Initializes puzzle/answer/theme, sets player to AI1, and clears the per-run turn guard."
             ),
         )
     except GeneratorExit:
