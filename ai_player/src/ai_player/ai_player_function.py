@@ -179,7 +179,7 @@ async def spin_wheel_and_guess_consonant(
                     update_score(player_name, amount * occurrences)
             except Exception as e:
                 logger.warning("Failed to apply letter updates: %s", e)
-        
+
         # Build output snapshot
         try:
             import json as _json
@@ -229,6 +229,7 @@ async def spin_wheel_and_guess_consonant(
             description=(
                 "Spin the wheel and propose an unguessed consonant; returns structured JSON with spin result and a state snapshot. "
                 "After calling this tool, COPY the 'final_answer' field verbatim as your Final Answer and STOP. Do not call any more tools."
+                "Always try to solve the puzzle first, buy vowel second, and last priority is to spin."
             )
         )
     except GeneratorExit:
@@ -354,6 +355,7 @@ async def buy_vowel_if_enough_money(
             description=(
                 "If the player has enough money, propose and buy a vowel; returns structured JSON with choice, occurrences, and updated state. "
                 "After calling this tool, COPY the 'final_answer' field verbatim as your Final Answer and STOP. Do not call any more tools."
+                "Always try to solve the puzzle first, buy vowel second, and last priority is to spin."
             )
         )
     except GeneratorExit:
@@ -379,8 +381,6 @@ async def solve_puzzle_if_knows_answer(
         try:
             data = json.loads(input_text) if input_text else {}
             player_name = data.get("player") or data.get("turn") or player_name
-            # Allow either "solution" or "proposed_solution" from agent input
-            proposed_solution = (data.get("proposed_solution") or data.get("solution") or None)
         except Exception:
             data = {}
 
@@ -403,81 +403,67 @@ async def solve_puzzle_if_knows_answer(
             logger.warning("Failed to load true answer from Redis: %s", e)
 
         success = False
-        details = "No proposed solution provided"
-        if proposed_solution:
-            if true_answer is None:
-                details = f"Proposed '{proposed_solution}', but true answer unavailable"
-            else:
-                # Case-insensitive comparison, strip spaces
-                norm_true = "".join(true_answer.upper().split())
-                norm_prop = "".join(str(proposed_solution).upper().split())
-                success = norm_true == norm_prop
-                details = (
-                    f"Correct! '{proposed_solution}' matches the answer"
-                    if success
-                    else f"Incorrect: proposed '{proposed_solution}', answer is '{true_answer}'"
-                )
-        else:
-            # No proposal provided; attempt LLM guess using masked puzzle + theme context
+        details = "No solution available yet"
+        # Always attempt LLM guess using masked puzzle + theme context
+        try:
+            # Gather masked puzzle/theme from input or Redis
+            masked_puzzle = None
+            theme = None
             try:
-                # Gather masked puzzle/theme from input or Redis
-                masked_puzzle = None
-                theme = None
+                masked_puzzle = data.get("puzzle")
+                theme = data.get("theme")
+            except Exception:
+                pass
+            if not masked_puzzle:
                 try:
-                    masked_puzzle = data.get("puzzle")
-                    theme = data.get("theme")
+                    masked_puzzle = get_field("puzzle")
                 except Exception:
-                    pass
-                if not masked_puzzle:
-                    try:
-                        masked_puzzle = get_field("puzzle")
-                    except Exception:
-                        masked_puzzle = None
-                if not theme:
-                    try:
-                        theme = get_field("theme")
-                    except Exception:
-                        theme = None
-
-                llm = await builder.get_llm("nim_llm", wrapper_type="langchain")
-                system_preamble = (
-                    "You are a Wheel of Fortune solver. Given a masked puzzle and theme, output only the solved puzzle in UPPERCASE letters and spaces."
-                )
-                prompt = (
-                    f"{system_preamble}\n"
-                    f"Masked Puzzle: {masked_puzzle}\n"
-                    f"Theme: {theme}\n"
-                    f"Rules: Return only the solved phrase in uppercase letters and spaces (no quotes, no punctuation, no explanation)."
-                )
-                llm_output = await llm.ainvoke(prompt)
+                    masked_puzzle = None
+            if not theme:
                 try:
-                    proposed_solution = getattr(llm_output, "content", None) or (
-                        llm_output if isinstance(llm_output, str) else str(llm_output)
-                    )
+                    theme = get_field("theme")
                 except Exception:
-                    proposed_solution = str(llm_output)
+                    theme = None
 
-                # Cleanup proposed solution: keep letters and spaces only, uppercase
-                import re as _re
-                proposed_solution = _re.sub(r"[^A-Za-z ]+", "", proposed_solution or "").upper().strip()
+            llm = await builder.get_llm("nim_llm", wrapper_type="langchain")
+            system_preamble = (
+                "You are a Wheel of Fortune solver. Given a masked puzzle and theme, output only the solved puzzle in UPPERCASE letters and spaces."
+            )
+            prompt = (
+                f"{system_preamble}\n"
+                f"Masked Puzzle: {masked_puzzle}\n"
+                f"Theme: {theme}\n"
+                f"Rules: Return only the solved phrase in uppercase letters and spaces (no quotes, no punctuation, no explanation)."
+            )
+            llm_output = await llm.ainvoke(prompt)
+            try:
+                proposed_solution = getattr(llm_output, "content", None) or (
+                    llm_output if isinstance(llm_output, str) else str(llm_output)
+                )
+            except Exception:
+                proposed_solution = str(llm_output)
 
-                if proposed_solution:
-                    if true_answer is None:
-                        details = f"LLM proposed '{proposed_solution}', but true answer unavailable"
-                    else:
-                        norm_true = "".join(true_answer.upper().split())
-                        norm_prop = "".join(str(proposed_solution).upper().split())
-                        success = norm_true == norm_prop
-                        details = (
-                            f"Correct! LLM guessed '{proposed_solution}'"
-                            if success
-                            else f"LLM guessed '{proposed_solution}', but answer is '{true_answer}'"
-                        )
+            # Cleanup proposed solution: keep letters and spaces only, uppercase
+            import re as _re
+            proposed_solution = _re.sub(r"[^A-Za-z ]+", "", proposed_solution or "").upper().strip()
+
+            if proposed_solution:
+                if true_answer is None:
+                    details = f"LLM proposed '{proposed_solution}', but true answer unavailable"
                 else:
-                    details = "LLM did not produce a usable guess"
-            except Exception as e:
-                logger.warning("LLM guess failed in solve tool: %s", e)
-                # Keep default details if still unset
+                    norm_true = "".join(true_answer.upper().split())
+                    norm_prop = "".join(str(proposed_solution).upper().split())
+                    success = norm_true == norm_prop
+                    details = (
+                        f"Correct! LLM guessed '{proposed_solution}'"
+                        if success
+                        else f"LLM guessed '{proposed_solution}', but answer is '{true_answer}'"
+                    )
+            else:
+                details = "LLM did not produce a usable guess"
+        except Exception as e:
+            logger.warning("LLM guess failed in solve tool: %s", e)
+            # Keep default details if still unset
 
         if success:
             # Mark game finished and reveal the full puzzle for clarity
@@ -526,12 +512,12 @@ async def solve_puzzle_if_knows_answer(
         yield FunctionInfo.from_fn(
             _solve_puzzle_if_knows_answer,
             description=(
-                "Attempt to solve the puzzle using the provided or LLM-inferred solution; compares with Redis answer, updates status/puzzle on success, and returns structured JSON. "
+                "Attempt to solve the puzzle by inferring a solution with the LLM using the masked puzzle and theme; compares with Redis answer, updates status/puzzle on success, and returns structured JSON. "
                 "After calling this tool, COPY the 'final_answer' field verbatim as your Final Answer and STOP. Do not call any more tools."
+                "Always try to solve the puzzle first, buy vowel second, and last priority is to spin."
             )
         )
     except GeneratorExit:
         logger.warning("Function exited early!")
     finally:
         logger.info("Cleaning up solve_puzzle workflow.")
-
