@@ -1,0 +1,30 @@
+
+
+llms:
+  nim_llm:
+    _type: nim
+    model_name: meta/llama-3.1-70b-instruct
+    temperature: 0.0
+    max_tokens: 1024
+  openai_llm:
+    _type: openai
+    model_name: gpt-4o
+    max_tokens: 2000
+
+functions:
+  solve_puzzle_if_knows_answer:
+    _type: solve_puzzle_if_knows_answer
+  spin_wheel_and_guess_consonant:
+    _type: spin_wheel_and_guess_consonant
+  buy_vowel_if_enough_money:
+    _type: buy_vowel_if_enough_money
+    vowel_strategy: heuristic  # options: heuristic, random
+
+workflow:
+  _type: sequential_executor
+  tool_list:
+    - solve_puzzle_if_knows_answer
+    - buy_vowel_if_enough_money
+    - spin_wheel_and_guess_consonant
+  llm_name: openai_llm
+  raise_type_incompatibility: false

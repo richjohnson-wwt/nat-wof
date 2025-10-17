@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wof-shared"
+version = "0.1.0"
+description = "Shared Wheel of Fortune library for NAT apps (pat, ai_player, human)"
+requires-python = ">=3.10"
+keywords = ["wheel-of-fortune", "nemo", "nat"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["wof_shared*"]
+
+[tool.setuptools.package-data]
+"wof_shared" = ["assets/*.txt"]

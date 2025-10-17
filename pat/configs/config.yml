@@ -1,0 +1,14 @@
+general:
+  logging:
+    level: WARN
+
+  front_end:
+    _type: console
+
+workflow:
+  _type: pat
+  parameter: default_value
+  players:
+      ai1: AI_Joe
+      ai2: AI_Jane
+      human: Richard
