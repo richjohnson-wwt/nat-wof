@@ -7,11 +7,11 @@ from pathlib import Path
 
 from wof_shared.state import get_field
 
-# .../nemo-agent-toolkit
-REPO_ROOT = Path(__file__).resolve().parents[2]
-AI_CONFIG = "nat_wof_game/ai_player/configs/config.yml"
-PAT_CONFIG = "nat_wof_game/pat/configs/config.yml"
-PROMPT_PATH = REPO_ROOT / "nat_wof_game/ai_player/data" / "prompt.json"
+# Project root (nat_wof_game)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AI_CONFIG = "ai_player/configs/config.yml"
+PAT_CONFIG = "pat/configs/config.yml"
+PROMPT_PATH = REPO_ROOT / "ai_player" / "data" / "prompt.json"
 
 def create_new_game():
     return subprocess.run(
@@ -22,12 +22,12 @@ def create_new_game():
 
 def run_human():
     subprocess.run(
-        [sys.executable, "nat_wof_game/pat/src/pat/redis_admin.py", "set_turn", "Human"],
+        [sys.executable, "pat/src/pat/redis_admin.py", "set_turn", "Human"],
         cwd=REPO_ROOT,
         check=False,
     )
     return subprocess.run(
-        [sys.executable, "nat_wof_game/human/human_cli.py"],
+        [sys.executable, "human/human_cli.py"],
         cwd=REPO_ROOT,
         check=False,
     ).returncode
@@ -35,13 +35,13 @@ def run_human():
 def run_ai(player: str):
     # Regenerate the AI prompt so it reflects the latest Redis state
     subprocess.run(
-        [sys.executable, "nat_wof_game/pat/src/pat/redis_admin.py", "set_turn", player],
+        [sys.executable, "pat/src/pat/redis_admin.py", "set_turn", player],
         cwd=REPO_ROOT,
         check=False,
     )
 
     gen = subprocess.run(
-        [sys.executable, "nat_wof_game/pat/src/pat/redis_admin.py", "generate_ai_player_prompt"],
+        [sys.executable, "pat/src/pat/redis_admin.py", "generate_ai_player_prompt"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,

@@ -124,23 +124,23 @@ nat run --config_file pat/configs/config.yml --input "Start a new game"
 
 ```bash
 # If you want a guaranteed fresh start, you can first finish any existing game
-uv run wof/pat/src/pat/redis_admin.py finished
+uv run pat/src/pat/redis_admin.py finished
 
 # Clear the per-run guard just in case
-uv run wof/pat/src/pat/redis_admin clear_turn
+uv run pat/src/pat/redis_admin clear_turn
 
 # Start a fresh game with Pat
-nat run --config_file wof/pat/configs/config.yml --input "Start a new game"
+nat run --config_file pat/configs/config.yml --input "Start a new game"
 ```
 
 Between AI turns, clear the single-turn guard and (optionally) set whose turn it is:
 
 ```bash
 # Create the ai player input file
-uv run wof/pat/src/pat/redis_admin.py generate_ai_player_prompt
+uv run pat/src/pat/redis_admin.py generate_ai_player_prompt
 
 # Optionally set whose turn it is
-uv run wof/pat/src/pat/redis_admin.py set_turn AI1   # or AI2 or Human
+uv run pat/src/pat/redis_admin.py set_turn AI1   # or AI2 or Human
 ```
 
 Then run the AI player with instruction + JSON state (see examples above). The AI tools will mutate Redis and return a structured JSON snapshot. The agent will output the tool's final_answer verbatim and stop.

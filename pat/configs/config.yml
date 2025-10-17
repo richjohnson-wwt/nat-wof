@@ -1,9 +1,3 @@
-general:
-  logging:
-    level: WARN
-
-  front_end:
-    _type: console
 
 workflow:
   _type: pat

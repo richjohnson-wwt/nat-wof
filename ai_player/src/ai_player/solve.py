@@ -36,6 +36,8 @@ async def solve_puzzle_if_knows_answer(
         try:
             data = json.loads(input_text) if input_text else {}
             player_name = data.get("player")
+            masked_puzzle = data.get("puzzle")
+            theme = data.get("theme")
         except Exception:
             data = {}
 
@@ -44,32 +46,14 @@ async def solve_puzzle_if_knows_answer(
 
         # Attempt LLM guess using masked puzzle + theme context
         try:
-            # Gather masked puzzle/theme from input or Redis
-            masked_puzzle = None
-            theme = None
-            try:
-                masked_puzzle = data.get("puzzle")
-                theme = data.get("theme")
-            except Exception:
-                pass
-            if not masked_puzzle:
-                try:
-                    masked_puzzle = get_field("puzzle")
-                except Exception:
-                    masked_puzzle = None
-            if not theme:
-                try:
-                    theme = get_field("theme")
-                except Exception:
-                    theme = None
 
             llm = await builder.get_llm("openai_llm", wrapper_type="langchain")
             current_money = get_player_score(player_name)
             if current_money >= 250:
                 system_preamble = (
-                    "You are playing Wheel of Fortune and have enough money to buy a vowel. Decide exactly ONE of the following and reply accordingly:\n"
+                    "You are playing Wheel of Fortune and have enough money to buy a vowel IF it makes sense to do so. Decide exactly ONE of the following and reply accordingly:\n"
                     "1) Highest priority is to solve the puzzle but only if you are confident that you can solve the puzzle, reply: 'Solution: <ANSWER>' (UPPERCASE letters and spaces only).\n"
-                    "2) If you want to buy a vowel, reply exactly: 'I would like to buy a vowel'.\n"
+                    "2) If you want to buy a vowel and it makes sense to do so, reply exactly: 'I would like to buy a vowel'.\n"
                     "3) If you want to spin, reply exactly: 'I would like to spin'.\n"
                     "Do not add any extra commentary."
                 )
@@ -148,13 +132,6 @@ async def solve_puzzle_if_knows_answer(
                 # If an incorrect solve was attempted, end the turn (skip downstream)
                 if not success:
                     logger.info("Solve step: incorrect solve attempted; ending turn and skipping downstream steps.")
-                elif next_action == "buy_vowel":
-                    details = "Chose to buy a vowel."
-                    success = False
-                elif next_action == "spin":
-                    details = "Chose to spin."
-                    success = False
-                else:
                     details = "LLM did not produce a usable guess"
 
             if success:
@@ -174,41 +151,9 @@ async def solve_puzzle_if_knows_answer(
                     reveal_all()
                 except Exception as e:
                     logger.warning("Failed to finalize game on correct solve: %s", e)
-
-            try:
-                import json as _json
-                scores_snapshot = get_field("scores")
-                try:
-                    scores_snapshot = _json.loads(scores_snapshot) if scores_snapshot else {}
-                except Exception:
-                    pass
-            except Exception:
-                scores_snapshot = None
-
-            # Compose final answer for solve attempt
-            if success and llm_guess:
-                fa = f"Final Answer: Solved '{llm_guess}'."
-            elif next_action == "solve" and llm_guess:
-                fa = f"Final Answer: LLM proposed '{llm_guess}' but it was incorrect."
-            elif next_action == "buy_vowel":
-                fa = "Final Answer: I would like to buy a vowel."
-                success = False
-            elif next_action == "spin":
-                details = "Chose to spin."
-                success = False
-            else:
-                details = "LLM did not produce a usable guess"
         except Exception as e:
-            logger.warning("LLM guess failed in solve tool: %s", e)
-            # Keep default details if still unset
-
-        if success:
-            # Mark game finished and reveal the full puzzle for clarity
-            try:
-                set_current_game_status_finished()
-                reveal_all()
-            except Exception as e:
-                logger.warning("Failed to finalize game on correct solve: %s", e)
+            logger.warning("Failed to solve puzzle: %s", e)
+            success = False
 
         try:
             import json as _json
@@ -252,11 +197,6 @@ async def solve_puzzle_if_knows_answer(
             "skip_next": bool(success) or (next_action == "solve" and not success and llm_guess is not None),
             "final_answer": fa,
         }
-        # Initialize history with this step
-        try:
-            solve_output["history"] = [{k: v for k, v in solve_output.items() if k != "history"}]
-        except Exception:
-            pass
         return json.dumps(solve_output)
 
     try:
